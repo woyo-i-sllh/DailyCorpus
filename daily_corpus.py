@@ -67,7 +67,18 @@ def setup_stdout():
 
 def log(msg: str):
     now = datetime.now(BILI_TZ).strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{now}] {msg}", flush=True)
+    line = f"[{now}] {msg}"
+    try:
+        print(line, flush=True)
+    except UnicodeEncodeError:
+        # 控制台编码不支持 emoji 时降级输出，绝不因此中断抓取
+        try:
+            enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+            print(line.encode(enc, "replace").decode(enc, "replace"), flush=True)
+        except Exception:
+            pass
+    except Exception:
+        pass
 
 
 VERSION = "2.0.0"
@@ -117,6 +128,11 @@ def fetch_with_retry(name, url, referer, attempts=3, base_delay=2.0, raw=False):
             except (TypeError, ValueError):
                 code = raw_code
             if code == -352:
+                if i < attempts:
+                    wait = 15 * i
+                    log(f"  ⚠ [{name}] 风控(-352)，{wait} 秒后重试（第 {i}/{attempts} 次）")
+                    time.sleep(wait)
+                    continue
                 log(f"  ⚠ [{name}] 风控校验失败(-352)，跳过")
                 return False, None
             if isinstance(data, dict) and code not in (None, 0, 200, 20000):
@@ -148,15 +164,29 @@ def fetch_bili_hotword():
 
 
 def fetch_bili_ranking():
+    """全站热榜。v2 被风控(-352) 时自动退回结构不同的 v1 接口。"""
     ok, d = fetch_with_retry("B站全站热榜", "https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all",
                              "https://www.bilibili.com/")
+    if ok:
+        out = []
+        for i, v in enumerate(d.get("data", {}).get("list", []), 1):
+            st = v.get("stat") or {}
+            out.append((i, clean_text(v.get("title", "")), clean_text(v.get("desc", "")),
+                        st.get("view") or 0, v.get("short_link_v2") or f"https://www.bilibili.com/video/{v.get('bvid', '')}",
+                        v.get("pubdate") or 0))
+        return out
+
+    # ---- v1 备用接口（字段结构不同：play/coins/author/video_review）----
+    ok, d = fetch_with_retry("B站全站热榜(v1备用)", "https://api.bilibili.com/x/web-interface/ranking?rid=0&type=all",
+                             "https://www.bilibili.com/", attempts=2)
     if not ok:
         return []
     out = []
     for i, v in enumerate(d.get("data", {}).get("list", []), 1):
-        st = v.get("stat") or {}
-        out.append((i, clean_text(v.get("title", "")), clean_text(v.get("desc", "")),
-                    st.get("view") or 0, v.get("short_link_v2") or f"https://www.bilibili.com/video/{v.get('bvid', '')}",
+        bvid = v.get("bvid", "")
+        out.append((i, clean_text(v.get("title", "")), "",
+                    v.get("play") or 0,
+                    f"https://www.bilibili.com/video/{bvid}" if bvid else "",
                     v.get("pubdate") or 0))
     return out
 
