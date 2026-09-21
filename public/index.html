@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DailyCorpus · 全网热词历史看板</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--line:#e6e9f0;--text:#1e2430;--muted:#7b8496;--accent:#3b5bdb;--hot:#f76707;--green:#0ca678}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Microsoft YaHei",system-ui,-apple-system,"PingFang SC",sans-serif;background:var(--bg);color:var(--text)}
+header{background:linear-gradient(135deg,#2b3f8f,#3b5bdb);color:#fff;padding:26px 22px}
+header h1{margin:0;font-size:24px;letter-spacing:.5px}
+header p{margin:7px 0 0;opacity:.88;font-size:13px}
+.wrap{max-width:1180px;margin:0 auto;padding:18px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.kpi .v{font-size:23px;font-weight:700;font-variant-numeric:tabular-nums}
+.kpi .l{font-size:12px;color:var(--muted);margin-top:3px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.tabs button{border:1px solid var(--line);background:var(--card);padding:8px 15px;border-radius:999px;cursor:pointer;font-size:14px;color:var(--text);transition:.15s}
+.tabs button:hover{border-color:var(--accent)}
+.tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
+.card h3{margin:0 0 10px;font-size:16px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;background:#fafbfd;position:sticky;top:0;z-index:1}
+tbody tr:hover{background:#f7f9ff}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.muted{color:var(--muted);font-size:12px}
+.kw{cursor:pointer}
+.chips span{display:inline-block;background:#eef2ff;color:#3b5bdb;border-radius:8px;padding:3px 9px;margin:3px 4px 0 0;font-size:12.5px}
+.bar{height:7px;background:#eef1f7;border-radius:4px;overflow:hidden;min-width:60px}
+.bar i{display:block;height:100%;background:var(--accent)}
+select,input{padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:#fff;color:var(--text)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:860px){.grid2{grid-template-columns:1fr}}
+.scroll{max-height:540px;overflow:auto}
+.item{border-left:3px solid var(--accent);padding:9px 12px;margin:10px 0;background:#fafbff;border-radius:0 8px 8px 0}
+.item h4{margin:0 0 5px;font-size:14.5px}
+.item p{margin:4px 0;font-size:13.5px;line-height:1.6}
+.impact{color:var(--green);font-size:12.5px}
+.rank{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:24px 12px 40px}
+svg text{fill:var(--muted);font-size:10px}
+.loading{color:var(--muted);padding:20px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>📊 DailyCorpus · 全网热词历史看板</h1>
+  <p>微博热搜三年历史存档 + 每日多平台语料 + AI 要闻精选（数据每日自动更新）</p>
+</header>
+<div class="wrap">
+  <div class="kpis" id="kpis"><div class="kpi"><div class="v">…</div><div class="l">加载中</div></div></div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="overview" class="on">📈 概览</button>
+    <button data-tab="top">🔥 热词榜</button>
+    <button data-tab="search">🔍 关键词搜索</button>
+    <button data-tab="monthly">🗓 月度热词</button>
+    <button data-tab="digest">📰 AI 要闻精选</button>
+    <button data-tab="live">🧾 每日语料</button>
+  </nav>
+  <div id="panel"><div class="loading">正在加载数据…</div></div>
+</div>
+<footer>DailyCorpus · 数据来源：微博热搜历史存档、抖音/微博/百度/头条/B站热榜、东方财富/新浪财经/同花顺/华尔街见闻 · 仅供研究参考，不构成投资建议</footer>
+<script>
+var DATA = {};
+var curTab = 'overview';
+var panel = document.getElementById('panel');
+
+function el(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
+function num(n){ n = Number(n)||0; if(n>=100000000) return (n/100000000).toFixed(2)+'亿'; if(n>=10000) return (n/10000).toFixed(1)+'万'; return n.toLocaleString(); }
+function load(name){ return fetch('data/'+name+'.json').then(function(r){ if(!r.ok) throw new Error(name); return r.json(); }).then(function(j){ DATA[name]=j; return j; }); }
+
+function kpis(){
+  var m = DATA.meta;
+  var items = [
+    ['覆盖天数', m.days + ' 天'],
+    ['日期范围', m.start + ' ~ ' + m.end],
+    ['热搜词条', num(m.archive_keywords) + ' 条'],
+    ['唯一关键词', num(m.unique_keywords) + ' 个'],
+    ['日常语料', num(m.live_entries) + ' 条 (' + m.live_days + '天)']
+  ];
+  el('kpis').innerHTML = items.map(function(x){
+    return '<div class="kpi"><div class="v">'+esc(x[1])+'</div><div class="l">'+esc(x[0])+'</div></div>';
+  }).join('');
+}
+
+// ---------- 迷你折线图（SVG，无依赖） ----------
+function lineChart(values, labels, opts){
+  opts = opts || {};
+  var w = opts.w || 1120, h = opts.h || 180, pad = 30;
+  var max = Math.max.apply(null, values.concat([1]));
+  var n = values.length;
+  if(n < 2) return '<div class="muted">数据点不足</div>';
+  var step = (w - pad*2) / (n - 1);
+  var pts = values.map(function(v,i){
+    var x = pad + i*step;
+    var y = h - pad - (v/max)*(h - pad*2);
+    return x.toFixed(1)+','+y.toFixed(1);
+  });
+  var area = 'M'+pad+','+(h-pad)+' L' + pts.join(' L') + ' L'+(pad + (n-1)*step).toFixed(1)+','+(h-pad)+' Z';
+  var yTicks = [0, Math.round(max/2), max].map(function(v){
+    var y = h - pad - (v/max)*(h - pad*2);
+    return '<text x="4" y="'+(y+3).toFixed(0)+'">'+num(v)+'</text><line x1="'+pad+'" x2="'+(w-pad)+'" y1="'+y.toFixed(1)+'" y2="'+y.toFixed(1)+'" stroke="#eef1f7"/>';
+  }).join('');
+  var xLabels = '';
+  if(labels && labels.length){
+    var idxs = [0, Math.floor((n-1)/2), n-1];
+    xLabels = idxs.map(function(i){
+      return '<text x="'+(pad + i*step).toFixed(0)+'" y="'+(h-8)+'" text-anchor="'+(i===0?'start':(i===n-1?'end':'middle'))+'">'+esc(labels[i])+'</text>';
+    }).join('');
+  }
+  return '<svg viewBox="0 0 '+w+' '+h+'" style="width:100%;height:auto">'+yTicks+
+    '<path d="'+area+'" fill="rgba(59,91,219,.10)"/>'+
+    '<polyline points="'+pts.join(' ')+'" fill="none" stroke="#3b5bdb" stroke-width="1.6"/>'+xLabels+'</svg>';
+}
+
+// ---------- 概览 ----------
+function renderOverview(){
+  var daily = DATA.daily;
+  var vals = daily.map(function(x){ return x.n + x.live; });
+  var labels = daily.map(function(x){ return x.d; });
+  var html = '<div class="card"><h3>每日热词数量趋势（'+esc(DATA.meta.start)+' ~ '+esc(DATA.meta.end)+'）</h3>'
+    + lineChart(vals, labels, {w:1120,h:190})
+    + '<div class="muted">蓝线为每天收录的热词/语料条数（微博热搜历史存档 + 日常多平台抓取）</div></div>';
+  // 最近 10 天的日常语料
+  var live = DATA.live.slice(-10).reverse();
+  if(live.length){
+    html += '<div class="card"><h3>最近 '+live.length+' 天抓取概况</h3><table><thead><tr><th>日期</th><th>条数</th><th>分类</th></tr></thead><tbody>';
+    live.forEach(function(x){
+      var cats = Object.keys(x.cats||{}).map(function(k){ return esc(k)+' '+x.cats[k]; }).join(' · ');
+      html += '<tr><td>'+esc(x.d)+'</td><td>'+x.n+'</td><td class="muted">'+cats+'</td></tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+  panel.innerHTML = html;
+}
+
+// ---------- 热词榜 ----------
+function renderTop(){
+  var top = DATA.top;
+  var years = Object.keys(top).filter(function(k){ return k !== 'all'; }).sort().reverse();
+  var opts = ['all'].concat(years);
+  var html = '<div class="card"><div class="row"><b>热词榜</b><select id="topSel">'
+    + opts.map(function(y){ return '<option value="'+y+'">'+(y==='all'?'全部时段':y+' 年')+'</option>'; }).join('')
+    + '</select><span class="muted">按"出现天数"排序，点击关键词看时间线</span></div><div id="topBody"></div></div>';
+  panel.innerHTML = html;
+  function draw(y){
+    var rows = top[y] || [];
+    var maxDays = Math.max.apply(null, rows.map(function(r){ return r.days; }).concat([1]));
+    var body = '<div class="scroll"><table><thead><tr><th>#</th><th>关键词</th><th>上榜天数</th><th></th><th>最好排名</th><th>首次</th><th>最近</th></tr></thead><tbody>';
+    rows.forEach(function(r,i){
+      body += '<tr><td class="rank">'+(i+1)+'</td><td class="kw" data-kw="'+esc(r.k)+'"><a href="javascript:void(0)">'+esc(r.k)+'</a></td>'
+        + '<td>'+r.days+'</td><td><div class="bar"><i style="width:'+(100*r.days/maxDays).toFixed(1)+'%"></i></div></td>'
+        + '<td>'+r.best+'</td><td class="muted">'+esc(r.first)+'</td><td class="muted">'+esc(r.last)+'</td></tr>';
+    });
+    body += '</tbody></table></div>';
+    el('topBody').innerHTML = body;
+    bindKw();
+  }
+  el('topSel').onchange = function(){ draw(this.value); };
+  draw('all');
+}
+
+// ---------- 关键词搜索 ----------
+function renderSearch(){
+  panel.innerHTML = '<div class="card"><div class="row"><b>关键词搜索</b>'
+    + '<input id="kwInput" placeholder="输入关键词，如 华为 / 高考 / 台风" style="min-width:260px">'
+    + '<span class="muted" id="kwHint"></span></div><div id="kwBody"><div class="muted">输入关键词开始搜索（数据为出现 2 天以上的热词）</div></div></div>';
+  var input = el('kwInput');
+  input.oninput = function(){
+    var q = input.value.trim();
+    if(q.length < 1){ el('kwBody').innerHTML = '<div class="muted">输入关键词开始搜索</div>'; el('kwHint').textContent=''; return; }
+    var items = DATA.keywords.items;
+    var hit = items.filter(function(x){ return x[0].indexOf(q) >= 0; }).slice(0, 50);
+    el('kwHint').textContent = '数据库中共 ' + items.length + ' 个索引关键词，匹配 ' + hit.length + ' 个';
+    var body = '<div class="scroll"><table><thead><tr><th>关键词</th><th>上榜天数</th><th>首次</th><th>最近</th><th>最好排名</th></tr></thead><tbody>';
+    hit.forEach(function(x){
+      var recs = x[1];
+      var first = recs[0][0], last = recs[recs.length-1][0];
+      var best = Math.min.apply(null, recs.map(function(r){ return r[1]; }));
+      body += '<tr><td class="kw" data-kw="'+esc(x[0])+'"><a href="javascript:void(0)">'+esc(x[0])+'</a></td><td>'+recs.length+'</td>'
+        + '<td class="muted">'+esc(first)+'</td><td class="muted">'+esc(last)+'</td><td>'+best+'</td></tr>';
+    });
+    body += '</tbody></table></div>';
+    el('kwBody').innerHTML = hit.length ? body : '<div class="muted">没有匹配到关键词</div>';
+    bindKw();
+  };
+}
+
+// ---------- 关键词时间线 ----------
+function showTimeline(kw){
+  var item = null;
+  for(var i=0;i<DATA.keywords.items.length;i++){ if(DATA.keywords.items[i][0] === kw){ item = DATA.keywords.items[i]; break; } }
+  if(!item){ alert('该关键词没有时间线数据（上榜天数少于 2 天）'); return; }
+  var recs = item[1];
+  var labels = recs.map(function(r){ return r[0]; });
+  var ranks = recs.map(function(r){ return r[1]; });
+  var maxRank = Math.max.apply(null, ranks.concat([10]));
+  var vals = ranks.map(function(r){ return maxRank + 1 - r; });  // 排名越靠前越高
+  var html = '<div class="card"><h3>「'+esc(kw)+'」上榜时间线</h3>'
+    + lineChart(vals, labels, {w:1120,h:180})
+    + '<div class="muted">纵轴越高＝排名越靠前（共上榜 '+recs.length+' 天，最好排名 '+Math.min.apply(null,ranks)+'）</div>'
+    + '<div class="scroll" style="max-height:280px"><table><thead><tr><th>日期</th><th>最好排名</th><th>当日出现次数</th></tr></thead><tbody>';
+  recs.slice().reverse().forEach(function(r){
+    html += '<tr><td>'+esc(r[0])+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td></tr>';
+  });
+  html += '</tbody></table></div></div>';
+  var box = el('timelineBox');
+  if(!box){ box = document.createElement('div'); box.id = 'timelineBox'; panel.insertBefore(box, panel.firstChild); }
+  box.innerHTML = html;
+  box.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function bindKw(){
+  var nodes = panel.querySelectorAll('.kw');
+  for(var i=0;i<nodes.length;i++){
+    nodes[i].onclick = function(){ showTimeline(this.getAttribute('data-kw')); };
+  }
+}
+
+// ---------- 月度热词 ----------
+function renderMonthly(){
+  var months = Object.keys(DATA.monthly).sort().reverse();
+  var html = '<div class="card"><div class="row"><b>月度热词 Top15</b><select id="monSel">'
+    + months.map(function(m){ return '<option value="'+m+'">'+m+'</option>'; }).join('')
+    + '</select><span class="muted">该月内上榜天数最多的关键词</span></div><div id="monBody"></div></div>';
+  panel.innerHTML = html;
+  function draw(m){
+    var rows = DATA.monthly[m] || [];
+    var max = Math.max.apply(null, rows.map(function(r){ return r.days; }).concat([1]));
+    var b = '<table><thead><tr><th>#</th><th>关键词</th><th>上榜天数</th><th></th></tr></thead><tbody>';
+    rows.forEach(function(r,i){
+      b += '<tr><td class="rank">'+(i+1)+'</td><td class="kw" data-kw="'+esc(r.k)+'"><a href="javascript:void(0)">'+esc(r.k)+'</a></td>'
+        + '<td>'+r.days+'</td><td><div class="bar"><i style="width:'+(100*r.days/max).toFixed(1)+'%"></i></div></td></tr>';
+    });
+    b += '</tbody></table>';
+    el('monBody').innerHTML = b;
+    bindKw();
+  }
+  el('monSel').onchange = function(){ draw(this.value); };
+  draw(months[0]);
+}
+
+// ---------- AI 要闻精选 ----------
+function renderDigest(){
+  var list = DATA.digest || [];
+  if(!list.length){ panel.innerHTML = '<div class="card"><div class="muted">暂无 AI 精选数据</div></div>'; return; }
+  var dates = list.map(function(x){ return x.d; }).reverse();
+  var html = '<div class="card"><div class="row"><b>AI 要闻精选</b><select id="digSel">'
+    + dates.map(function(d){ return '<option value="'+d+'">'+d+'</option>'; }).join('')
+    + '</select><span class="muted">由 DeepSeek 从当天全部语料中筛选并简析</span></div><div id="digBody"></div></div>';
+  panel.innerHTML = html;
+  function draw(d){
+    var item = null;
+    for(var i=0;i<list.length;i++){ if(list[i].d === d){ item = list[i]; break; } }
+    if(!item){ el('digBody').innerHTML = '<div class="muted">无数据</div>'; return; }
+    var h = '<div class="item" style="border-left-color:#f76707"><b>📌 当日要点</b><p>'+esc(item.summary)+'</p></div>';
+    if(item.keywords && item.keywords.length){
+      h += '<div class="chips">' + item.keywords.map(function(k){ return '<span>'+esc(k.word||k)+'</span>'; }).join('') + '</div>';
+    }
+    (item.items||[]).forEach(function(it,i){
+      h += '<div class="item"><h4>'+(i+1)+'. '+esc(it.title)+' <span class="rank">'+esc(it.source||'')+'</span></h4>'
+        + '<p>'+esc(it.analysis)+'</p>'
+        + (it.impact ? '<p class="impact">🎯 可能影响：'+esc(it.impact)+'</p>' : '') + '</div>';
+    });
+    el('digBody').innerHTML = h;
+  }
+  el('digSel').onchange = function(){ draw(this.value); };
+  draw(dates[0]);
+}
+
+// ---------- 每日语料 ----------
+function renderLive(){
+  var list = DATA.live || [];
+  if(!list.length){ panel.innerHTML = '<div class="card"><div class="muted">暂无日常语料数据</div></div>'; return; }
+  var dates = list.map(function(x){ return x.d; }).reverse();
+  var html = '<div class="card"><div class="row"><b>每日语料</b><select id="liveSel">'
+    + dates.map(function(d){ return '<option value="'+d+'">'+d+'</option>'; }).join('')
+    + '</select><span class="muted">当天抓取的多平台语料（热榜 + 财经快讯）</span></div><div id="liveBody"></div></div>';
+  panel.innerHTML = html;
+  function draw(d){
+    var item = null;
+    for(var i=0;i<list.length;i++){ if(list[i].d === d){ item = list[i]; break; } }
+    if(!item){ el('liveBody').innerHTML = '<div class="muted">无数据</div>'; return; }
+    var cats = Object.keys(item.cats||{}).map(function(k){ return '<span>'+esc(k)+' '+item.cats[k]+' 条</span>'; }).join('');
+    var h = '<div class="chips" style="margin-bottom:10px">'+cats+'</div><div class="grid2">';
+    h += '<div><h3>🔥 综合大事</h3><div class="scroll"><table><tbody>';
+    (item.top||[]).forEach(function(x,i){
+      h += '<tr><td class="rank">'+(i+1)+'</td><td>'+(x.u?'<a href="'+esc(x.u)+'" target="_blank" rel="noopener">'+esc(x.t)+'</a>':esc(x.t))+'</td>'
+        + '<td class="muted">'+esc(x.s||'')+'</td><td class="rank">'+num(x.h)+'</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+    h += '<div><h3>📰 财经快讯</h3><div class="scroll"><table><tbody>';
+    (item.fin||[]).forEach(function(x,i){
+      h += '<tr><td class="rank">'+(i+1)+'</td><td>'+(x.u?'<a href="'+esc(x.u)+'" target="_blank" rel="noopener">'+esc(x.t)+'</a>':esc(x.t))+'</td>'
+        + '<td class="muted">'+esc(x.s||'')+'</td></tr>';
+    });
+    h += '</tbody></table></div></div></div>';
+    el('liveBody').innerHTML = h;
+  }
+  el('liveSel').onchange = function(){ draw(this.value); };
+  draw(dates[0]);
+}
+
+var RENDER = { overview: renderOverview, top: renderTop, search: renderSearch, monthly: renderMonthly, digest: renderDigest, live: renderLive };
+
+function switchTab(name){
+  curTab = name;
+  var btns = document.querySelectorAll('#tabs button');
+  for(var i=0;i<btns.length;i++){ btns[i].className = (btns[i].getAttribute('data-tab') === name) ? 'on' : ''; }
+  RENDER[name]();
+}
+
+(function init(){
+  var btns = document.querySelectorAll('#tabs button');
+  for(var i=0;i<btns.length;i++){
+    btns[i].onclick = function(){ switchTab(this.getAttribute('data-tab')); };
+  }
+  Promise.all([load('meta'), load('daily'), load('top'), load('monthly'), load('digest'), load('live'), load('keywords')])
+    .then(function(){ kpis(); switchTab('overview'); })
+    .catch(function(e){ panel.innerHTML = '<div class="card"><b>数据加载失败</b><div class="muted">请通过 HTTP 访问（GitHub Pages 或 python -m http.server），不要直接用 file:// 打开。错误：'+esc(e.message)+'</div></div>'; });
+})();
+</script>
+</body>
+</html>

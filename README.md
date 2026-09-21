@@ -3,6 +3,16 @@
 抓取**当天**各平台热点（大事）与财经消息，生成可量化的语料库，并写入 SQLite 数据库。
 运行在自带虚拟环境里，匿名接口、无需登录；DeepSeek 负责每日要闻精选与简析。
 
+## 📊 在线看板
+
+**https://woyo-i-sllh.github.io/DailyCorpus/**
+
+- 微博热搜**近三年历史**（1094 天 / 42 万条热词，每日持续回填）
+- 热词榜（全时段 / 分年度）、关键词搜索 + 个人时间线、月度热词 Top15
+- AI 要闻精选（每日要点 + 12 条要闻简析 + 关键词）
+- 每日语料（多平台热榜 + 财经快讯）
+
+
 ## 数据源
 
 | 分类 | 数据源 |
@@ -109,7 +119,49 @@ schtasks /Delete /TN DailyCorpus /F
 > `--since-hours 24` 的含义：财经快讯（东财/新浪/同花顺/华尔街见闻）只保留最近 24 小时内的条目，
 > 这样每天 20:00 跑一次就能覆盖"昨天 20:00 → 今天 20:00"的完整一天；热词/热榜是即时快照，不受影响。
 
-## 数据看板
+## 历史数据回填（近三年）
+
+当前接口只能拿"当下"的榜单，历史数据来自公开存档：
+**微博热搜每日存档** `github.com/justjavac/weibo-trending-hot-search`（2020-11 至今，每天多个时段快照）。
+
+```powershell
+".venv\Scripts\python.exe" backfill_weibo.py                     # 默认回填最近 3 年
+".venv\Scripts\python.exe" backfill_weibo.py --start 2024-01-01  # 指定区间
+".venv\Scripts\python.exe" backfill_weibo.py --days 30           # 只补最近 30 天
+```
+
+- 写入 `corpus.db` 的 `entries_archive` 表（日期 / 关键词 / 最好排名 / 当日出现次数）
+- 原始 JSON 缓存在 `data/weibo_archive/`（已 gitignore，可重复下载）
+- 已回填：**1094 天、420,361 条热词、354,184 个唯一关键词**（2023-09-22 ~ 2026-09-21）
+- 幂等：重复运行只补缺失日期
+
+## 静态站点（GitHub Pages）
+
+`public/` 是可直接部署的静态看板（无后端、无 CDN 依赖，纯原生 JS 画图）。
+
+```powershell
+".venv\Scripts\python.exe" build_public.py      # 从 corpus.db 导出 public/data/*.json
+".venv\Scripts\python.exe" -m http.server 8899 --directory public   # 本地预览
+```
+
+导出文件：`meta / daily / top / keywords / monthly / digest / live`（合计约 2 MB）。
+
+### 发布（手动，不做自动化）
+
+```powershell
+cd F:\life\DailyCorpus
+".venv\Scripts\python.exe" build_public.py     # 1. 刷新数据
+git add -A                                      # 2. 提交
+git commit -m "更新看板数据"
+git push                                        # 3. 推送
+```
+
+推送后 `.github/workflows/pages.yml` 会自动把 `public/` 发布到 GitHub Pages。
+
+> **一次性设置**：GitHub 仓库 → Settings → Pages → Build and deployment → Source 选
+> **GitHub Actions**。之后每次 push 都会自动更新网站。
+
+## 本地数据看板
 
 本地网页，查询每天的大事/财经/热词/词频/AI 精选（读 corpus.db，零依赖）：
 
